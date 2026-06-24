@@ -8,7 +8,7 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
 
 ## Tasks
 
-- [ ] 1. Project scaffolding — directory structure, dependencies, and `pyproject.toml`
+- [-] 1. Project scaffolding — directory structure, dependencies, and `pyproject.toml`
   - Create the `autospec_pipeline/` package tree:
     ```
     autospec_pipeline/
@@ -79,24 +79,24 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - Return `response.choices[0].message.content`
     - _Requirements: 6.3_
 
-  - [ ]* 3.5 Write property test — Property 13: LLMWrapper rejects invalid provider at construction
+  - [ ] 3.5 Write property test — Property 13: LLMWrapper rejects invalid provider at construction
     - **Property 13: LLMWrapper Rejects Invalid Provider at Construction**
     - Use Hypothesis `st.one_of(st.none(), st.just(""), st.text().filter(lambda s: s not in ("bedrock","openai")))` for provider values
     - Assert `ConfigurationError` is raised before any API call
     - **Validates: Requirements 6.4**
 
-  - [ ]* 3.6 Write property test — Property 14: LLMWrapper rejects missing required keys at construction
+  - [ ] 3.6 Write property test — Property 14: LLMWrapper rejects missing required keys at construction
     - **Property 14: LLMWrapper Rejects Missing Required Keys at Construction**
     - Hypothesis generates partial `ProviderConfig` dicts with one or more required keys absent or empty
     - Assert `ConfigurationError` naming the missing key
     - **Validates: Requirements 6.5**
 
-  - [ ]* 3.7 Write property test — Property 15: SDK exceptions wrapped in LLMProviderError
+  - [ ] 3.7 Write property test — Property 15: SDK exceptions wrapped in LLMProviderError
     - **Property 15: SDK Exceptions Wrapped in LLMProviderError**
     - Hypothesis generates arbitrary exception types; mock SDK raises each; assert `LLMProviderError` wraps provider name and original message
     - **Validates: Requirements 6.6**
 
-  - [ ]* 3.8 Write property test — Property 16: Prompt length validation in LLMWrapper
+  - [ ] 3.8 Write property test — Property 16: Prompt length validation in LLMWrapper
     - **Property 16: Prompt Length Validation in LLMWrapper**
     - Hypothesis generates empty strings (`st.just("")`) and strings longer than 1,000,000 chars; assert `ValueError` raised without any API call
     - **Validates: Requirements 6.7**
@@ -112,17 +112,17 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - Raise `SpecGenerationError` if response is empty, null-equivalent, or missing/malformed keys
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-  - [ ]* 4.2 Write property test — Property 3: SpecAgent output conforms to required schema
+  - [ ] 4.2 Write property test — Property 3: SpecAgent output conforms to required schema
     - **Property 3: SpecAgent Output Conforms to Required Schema**
     - Hypothesis generates non-empty `brief` strings and lists of hint strings; mock LLMWrapper returns valid JSON; assert returned dict has exactly the four required keys with correct types
     - **Validates: Requirements 2.1, 2.3**
 
-  - [ ]* 4.3 Write property test — Property 4: SpecGenerationError on empty or unparseable response
+  - [ ] 4.3 Write property test — Property 4: SpecGenerationError on empty or unparseable response
     - **Property 4: SpecGenerationError on Empty or Unparseable Response**
     - Hypothesis generates empty strings, null-equivalent strings, and non-JSON garbage; assert `SpecGenerationError` raised with a non-empty message identifying the failure reason
     - **Validates: Requirements 2.4**
 
-  - [ ]* 4.4 Write unit tests for SpecAgent happy-path and edge cases
+  - [ ] 4.4 Write unit tests for SpecAgent happy-path and edge cases
     - Test exact prompt structure includes `brief` and formatted hints
     - Test that `llm.complete` is called exactly once per `run` invocation
     - Test JSON embedded inside markdown fences is successfully parsed
@@ -132,70 +132,80 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
   - [ ] 5.1 Implement `BuildAgent.__init__` and `run` method
     - Constructor accepts `llm: LLMWrapper` and stores it
     - `run(spec: dict, tech_stack: str, failure_context: str | None = None) -> str`
-    - Build prompt embedding `spec`, `tech_stack`, and optional failure-context addendum
+    - Select prompt template based on `tech_stack`:
+      - When `tech_stack == "python"`: instruct the LLM to return the implementation inside a fenced `python` code block (` ```python ... ``` `)
+      - When `tech_stack == "node"`: instruct the LLM to return the implementation inside a fenced `javascript` code block (` ```javascript ... ``` `)
+    - Build prompt embedding `spec`, `tech_stack` (via the appropriate template), and optional failure-context addendum
     - Call `llm.complete(prompt)` exactly once
     - Extract first fenced markdown code block using regex `` ```[\w]*\n(.*?)``` `` (DOTALL)
     - Raise `CodeGenerationError` if no code block found
     - Let `LLMProviderError` and other exceptions propagate unchanged
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
 
-  - [ ]* 5.2 Write property test — Property 5: BuildAgent code block extraction
+  - [ ] 5.2 Write property test — Property 5: BuildAgent code block extraction
     - **Property 5: BuildAgent Code Block Extraction**
     - Hypothesis generates strings with one or more fenced code blocks at various positions; assert `run` returns content of the **first** block regardless of how many are present
     - **Validates: Requirements 3.1, 3.3**
 
-  - [ ]* 5.3 Write property test — Property 6: CodeGenerationError on missing code block
+  - [ ] 5.3 Write property test — Property 6: CodeGenerationError on missing code block
     - **Property 6: CodeGenerationError on Missing Code Block**
     - Hypothesis generates strings containing no triple-backtick delimiters; assert `CodeGenerationError` raised stating no code block was found
     - **Validates: Requirements 3.4**
 
-  - [ ]* 5.4 Write property test — Property 7: LLMWrapper exception propagation from BuildAgent
+  - [ ] 5.4 Write property test — Property 7: LLMWrapper exception propagation from BuildAgent
     - **Property 7: LLMWrapper Exception Propagation from BuildAgent**
     - Hypothesis generates arbitrary exception subclasses; mock `llm.complete` raises each; assert the same exception type propagates unchanged from `BuildAgent.run`
     - **Validates: Requirements 3.6**
 
-  - [ ]* 5.5 Write unit tests for BuildAgent
+  - [ ] 5.5 Write unit tests for BuildAgent
     - Test failure-context addendum appears in prompt when `failure_context` is provided
     - Test `llm.complete` called exactly once per `run` invocation
     - _Requirements: 3.2_
 
 - [ ] 6. Implement `TestAgent` (`agents/test_agent.py`)
-  - [ ] 6.1 Implement `TestAgent.__init__` and `run` method — temp files and subprocess
+  - [ ] 6.1 Implement `TestAgent.__init__` and `run` method — dual-stack temp files and subprocess
     - Constructor accepts `llm: LLMWrapper` and `quality_threshold: float`
-    - `run(code: str, spec: dict) -> dict`
-    - Call `llm.complete(prompt)` once to generate pytest test content
-    - Write `code` to `NamedTemporaryFile(suffix=".py", delete=False)`
-    - Write test content to `NamedTemporaryFile(prefix="test_", suffix=".py", delete=False)`
-    - Execute `subprocess.run(["pytest", test_file.name, "--import-mode=importlib", f"--rootdir={tempdir}", "-v"], capture_output=True, timeout=60, text=True)`
-    - _Requirements: 4.1, 4.2, 4.3_
+    - `run(code: str, spec: dict, tech_stack: str) -> dict`
+    - Call `llm.complete(prompt)` once to generate test content targeting the correct framework (`pytest` for Python, `Jest` for Node)
+    - Dispatch to Python or Node execution path based on `tech_stack`:
+      - **Python path**: Write `code` to `NamedTemporaryFile(suffix=".py", delete=False)` and test content to `NamedTemporaryFile(prefix="test_", suffix=".py", delete=False)` in the system temp dir; execute `subprocess.run(["pytest", test_file.name, "--import-mode=importlib", "--cov", "--cov-report=term-missing", "-v"], capture_output=True, timeout=60, text=True)`
+      - **Node path**: Create temp dir via `tempfile.mkdtemp()`; write `code` to `index.js`, test content to `index.test.js`, and a minimal `package.json` (declaring Jest as a dev dependency) to the temp dir; run `subprocess.run(["npm", "install"], cwd=tmp_dir, capture_output=True, timeout=60)` then `subprocess.run(["npx", "jest", "--coverage", "--coverageReporters=text"], cwd=tmp_dir, capture_output=True, timeout=60, text=True)`
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-  - [ ] 6.2 Implement result dict construction, coverage parsing, and `passed` override
-    - Parse `coverage` from `TOTAL    ...    <N>%` line in stdout; set `None` if absent
+  - [ ] 6.2 Implement result dict construction, stack-specific coverage parsing, and cleanup
+    - **Python coverage**: parse `TOTAL ... N%` line from stdout; convert as `float(N) / 100`; `None` if absent
+    - **Node coverage**: parse `All files ... N%` line from stdout; convert as `float(N) / 100`; `None` if absent
     - Set `passed = (result.returncode == 0)`
     - Override `passed = False` when `coverage is not None and coverage < self.quality_threshold`
     - Return dict with keys: `passed`, `exit_code`, `stdout`, `stderr`, `coverage`
-    - Delete both temp files in a `finally` block
-    - _Requirements: 4.4, 4.5, 4.6, 4.7_
+    - **Python cleanup** (`finally`): delete both `.py` temp files via `os.unlink`
+    - **Node cleanup** (`finally`): delete entire temp directory recursively via `shutil.rmtree(tmp_dir)`
+    - _Requirements: 4.6, 4.7, 4.8, 4.9, 4.10, 4.11_
 
-  - [ ]* 6.3 Write property test — Property 8: TestAgent result shape invariant
+  - [ ] 6.3 Write property test — Property 8: TestAgent result shape invariant
     - **Property 8: TestAgent Result Shape Invariant**
-    - Hypothesis generates arbitrary pytest exit codes and stdout/stderr strings; mock subprocess; assert returned dict has exactly the five required keys with correct types
-    - **Validates: Requirements 4.4**
-
-  - [ ]* 6.4 Write property test — Property 9: Coverage below threshold forces passed = False
-    - **Property 9: Coverage Below Threshold Forces Passed = False**
-    - Hypothesis generates `(exit_code, coverage, threshold)` triples where `coverage < threshold`; assert `passed == False` regardless of exit code
-    - **Validates: Requirements 4.5**
-
-  - [ ]* 6.5 Write property test — Property 10: Temp files always deleted
-    - **Property 10: Temp Files Always Deleted**
-    - Run `TestAgent.run` under both passing, failing, and exception-raising subprocess scenarios; after each call assert `os.path.exists(code_path) == False` and `os.path.exists(test_path) == False`
+    - Hypothesis generates arbitrary exit codes and stdout/stderr strings for both `tech_stack` values; mock subprocess; assert returned dict has exactly the five required keys with correct types
     - **Validates: Requirements 4.6**
 
-  - [ ]* 6.6 Write unit tests for TestAgent subprocess parameters
-    - Verify `subprocess.run` is called with `capture_output=True`, `timeout=60`, `text=True`
-    - Verify `--import-mode=importlib` flag is present in the command list
-    - _Requirements: 4.3_
+  - [ ] 6.4 Write property test — Property 8a: TestAgent uses correct test runner per tech stack
+    - **Property 8a: TestAgent Uses Correct Test Runner per Tech Stack**
+    - Mock `subprocess.run`; for `tech_stack="python"` assert command list starts with `["pytest", ...]` and includes `"--import-mode=importlib"` and `"--cov"`; for `tech_stack="node"` assert the final `subprocess.run` call uses `["npx", "jest", "--coverage", "--coverageReporters=text"]`; assert no other test runner is invoked for either stack
+    - **Validates: Requirements 4.4, 4.5**
+
+  - [ ] 6.5 Write property test — Property 9: Coverage below threshold forces passed = False
+    - **Property 9: Coverage Below Threshold Forces Passed = False**
+    - Hypothesis generates `(exit_code, coverage, threshold)` triples where `coverage < threshold`; assert `passed == False` regardless of exit code
+    - **Validates: Requirements 4.9**
+
+  - [ ] 6.6 Write property test — Property 10: Temp files always deleted
+    - **Property 10: Temp Files Always Deleted**
+    - Run `TestAgent.run` under passing, failing, and exception-raising subprocess scenarios for both stacks; for Python assert `os.path.exists(code_path) == False` and `os.path.exists(test_path) == False`; for Node assert `os.path.exists(tmp_dir) == False`
+    - **Validates: Requirements 4.10, 4.11**
+
+  - [ ] 6.7 Write unit tests for TestAgent subprocess parameters
+    - Verify Python path: `subprocess.run` called with `capture_output=True`, `timeout=60`, `text=True`, and `--import-mode=importlib` in command list
+    - Verify Node path: `npm install` called before `npx jest`; both calls use `cwd=tmp_dir`; `npx jest` call includes `--coverage` and `--coverageReporters=text`
+    - _Requirements: 4.4, 4.5_
 
 - [ ] 7. Implement `ReviewAgent` (`agents/review_agent.py`)
   - [ ] 7.1 Implement `ReviewAgent.__init__` and `run` method
@@ -207,12 +217,12 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - Raise `ReviewGenerationError` if response is empty, null-equivalent, or cannot be deserialized
     - _Requirements: 7.1, 7.2, 7.3, 7.4_
 
-  - [ ]* 7.2 Write property test — Property 17: ReviewAgent alignment report shape
+  - [ ] 7.2 Write property test — Property 17: ReviewAgent alignment report shape
     - **Property 17: ReviewAgent Alignment Report Shape**
     - Hypothesis generates spec dicts with N acceptance criteria (N from 1 to 20) and non-empty code strings; mock LLMWrapper returns valid JSON list of N entries; assert each entry has `covered: bool` and `notes: str` with `len(notes) <= 500`
     - **Validates: Requirements 7.2**
 
-  - [ ]* 7.3 Write unit tests for ReviewAgent error handling
+  - [ ] 7.3 Write unit tests for ReviewAgent error handling
     - Test `ReviewGenerationError` raised when response is empty string
     - Test `ReviewGenerationError` raised when response is non-JSON
     - Test that the error message identifies which input caused the failure
@@ -228,17 +238,17 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - For early-halt runs (e.g. SpecAgent error), include only nodes/edges for invoked agents
     - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-  - [ ]* 8.2 Write property test — Property 19: HandoffDiagram contains correct nodes for actual run
+  - [ ] 8.2 Write property test — Property 19: HandoffDiagram contains correct nodes for actual run
     - **Property 19: HandoffDiagram Contains Correct Nodes for Actual Run**
     - Hypothesis generates all subsets of the agent list and corresponding `agents_invoked` lists; assert node appears ↔ agent was invoked; assert no extra nodes present
     - **Validates: Requirements 8.1, 8.4**
 
-  - [ ]* 8.3 Write property test — Property 20: HandoffDiagram retry edge
+  - [ ] 8.3 Write property test — Property 20: HandoffDiagram retry edge
     - **Property 20: HandoffDiagram Retry Edge**
     - Hypothesis generates `retry_count` values in [1, 10]; assert exactly one edge `TestAgent -->|"retry (N)"| BuildAgent` appears and N matches `retry_count`
     - **Validates: Requirements 8.2**
 
-  - [ ]* 8.4 Write unit tests for HandoffDiagram edge cases
+  - [ ] 8.4 Write unit tests for HandoffDiagram edge cases
     - Test output is valid Mermaid `flowchart LR` string (starts with `flowchart LR`)
     - Test early-halt with only `PipelineInputs` and `SpecAgent` invoked
     - Test retry edge absent when `retry_count == 0`
@@ -261,12 +271,12 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
 
   - [ ] 10.2 Implement `Pipeline.run` — main execution flow and run-time input validation
     - Validate `brief` (non-empty str), `acceptance_criteria_hints` (list[str]), `tech_stack` (one of "python"/"node"), `quality_threshold` (float 0.0–1.0), `max_retries` (int 1–10)
-    - Execute `SpecAgent.run → BuildAgent.run → TestAgent.run` in order
+    - Execute `SpecAgent.run → BuildAgent.run(spec, tech_stack) → TestAgent.run(code, spec, tech_stack)` in order, forwarding `tech_stack` to both `BuildAgent` and `TestAgent`
     - Wrap each agent call in try/except; on exception set `error` key and return immediately with remaining output keys as `None`
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
 
   - [ ] 10.3 Implement the retry loop inside `Pipeline.run`
-    - While `test_result["passed"] == False` and `retry_count < max_retries`: increment `retry_count`, build `failure_context = stdout + stderr`, call `BuildAgent.run` then `TestAgent.run`
+    - While `test_result["passed"] == False` and `retry_count < max_retries`: increment `retry_count`, build `failure_context = stdout + stderr`, call `BuildAgent.run(spec, tech_stack, failure_context)` then `TestAgent.run(new_code, spec, tech_stack)` — forwarding `tech_stack` in both calls
     - On `BuildAgent` exception during retry: set `error`, set `retry_exhausted = False`, halt
     - After loop: set `retry_exhausted = True` if `retry_count == max_retries and not passed`, else `False`
     - Skip retry loop entirely if initial `passed == True`; set `retry_count = 0`, `retry_exhausted = False`
@@ -278,37 +288,37 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - Always include `handoff_diagram` in returned result, even on early error
     - _Requirements: 7.1, 7.5, 8.1, 8.3, 8.4_
 
-  - [ ]* 10.5 Write property test — Property 1: Pipeline result keys always present
+  - [ ] 10.5 Write property test — Property 1: Pipeline result keys always present
     - **Property 1: Pipeline Result Keys Are Always Present**
     - Hypothesis generates valid input combinations; mock all agents; assert returned dict always contains all eight required keys: `spec`, `code`, `test_result`, `handoff_diagram`, `retry_count`, `retry_exhausted`, `error`, `review`
     - **Validates: Requirements 1.3, 1.4**
 
-  - [ ]* 10.6 Write property test — Property 2: Exception capture sets error and nulls subsequent keys
+  - [ ] 10.6 Write property test — Property 2: Exception capture sets error and nulls subsequent keys
     - **Property 2: Exception Capture Sets Error and Nulls Subsequent Keys**
     - Hypothesis generates which agent (SpecAgent, BuildAgent, TestAgent) raises an exception; assert `error` is non-empty string and all keys for agents not yet invoked are `None`
     - **Validates: Requirements 1.4**
 
-  - [ ]* 10.7 Write property test — Property 11: Retry count accurately reflects loop iterations
+  - [ ] 10.7 Write property test — Property 11: Retry count accurately reflects loop iterations
     - **Property 11: Retry Count Accurately Reflects Loop Iterations**
     - Hypothesis generates pass/fail sequences and `max_retries` values; mock TestAgent with side-effect list; assert `retry_count` equals exact number of retry-loop body executions
     - **Validates: Requirements 5.4, 5.6**
 
-  - [ ]* 10.8 Write property test — Property 12: Retry exhaustion sets retry_exhausted = True
+  - [ ] 10.8 Write property test — Property 12: Retry exhaustion sets retry_exhausted = True
     - **Property 12: Retry Exhaustion Sets retry_exhausted = True**
     - Hypothesis generates `max_retries` ∈ [1,10]; mock TestAgent to always return `passed=False`; assert `retry_exhausted == True` and `retry_count == max_retries`
     - **Validates: Requirements 5.3**
 
-  - [ ]* 10.9 Write property test — Property 18: Partial coverage does not fail pipeline
+  - [ ] 10.9 Write property test — Property 18: Partial coverage does not fail pipeline
     - **Property 18: Partial Coverage Does Not Fail Pipeline**
     - Hypothesis generates alignment reports with at least one `covered=False` entry; mock ReviewAgent; assert `result["error"] is None`
     - **Validates: Requirements 7.5**
 
-  - [ ]* 10.10 Write property test — Property 21: Pipeline rejects invalid configuration at construction
+  - [ ] 10.10 Write property test — Property 21: Pipeline rejects invalid configuration at construction
     - **Property 21: Pipeline Rejects Invalid Configuration at Construction**
     - Hypothesis generates config dicts with one required key removed or set to an out-of-range/wrong-type value; assert `ConfigurationError` names the offending key
     - **Validates: Requirements 9.2, 9.3**
 
-  - [ ]* 10.11 Write unit tests for Pipeline agent ordering and key forwarding
+  - [ ] 10.11 Write unit tests for Pipeline agent ordering and key forwarding
     - Verify SpecAgent → BuildAgent → TestAgent are called in that order (use `unittest.mock.call_args_list` or call recording)
     - Verify `LLMWrapper` receives only `provider`, `model_id`, and provider-specific credential key(s) — not `max_retries`, `quality_threshold`, or `enable_review_agent`
     - _Requirements: 1.2, 9.4_
@@ -321,7 +331,7 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     - Exit with code 0 on success, 1 when `result["error"] is not None`
     - _Requirements: 1.1, 1.5, 9.1_
 
-  - [ ]* 11.2 Write unit tests for CLI argument parsing and exit codes
+  - [ ] 11.2 Write unit tests for CLI argument parsing and exit codes
     - Test `--brief` is required and raises SystemExit when absent
     - Test that `result["error"] is not None` causes exit code 1
     - Test formatted JSON is written to stdout on success
@@ -337,10 +347,10 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
 
 - Tasks marked with `*` are optional and can be skipped for a faster MVP
 - Each task references specific requirements for traceability
-- All 21 correctness properties from the design are covered as Hypothesis property tests in tasks 3, 4, 5, 6, 7, 8, and 10
+- All 22 correctness properties from the design are covered as Hypothesis property tests in tasks 3, 4, 5, 6, 7, 8, and 10
 - Checkpoints (tasks 9 and 12) are integration validation gates
 - The `LLMWrapper` is shared across all agents — construct it once in `Pipeline.__init__`
-- Temp file cleanup (Property 10) must be verified in both success and exception paths
+- Temp file cleanup (Properties 10) must be verified in both success and exception paths; Python uses `os.unlink` on two `.py` files; Node uses `shutil.rmtree` on the entire temp directory
 - The `handoff_diagram` key must always be present in the result dict, even on early error halt
 
 ---
@@ -355,7 +365,7 @@ Implement AutoSpec Pipeline as a Python package (`autospec_pipeline/`) consistin
     { "id": 2, "tasks": ["3.2", "3.3", "3.4"] },
     { "id": 3, "tasks": ["3.5", "3.6", "3.7", "3.8", "4.1", "5.1", "6.1", "7.1", "8.1"] },
     { "id": 4, "tasks": ["4.2", "4.3", "4.4", "5.2", "5.3", "5.4", "5.5", "6.2", "7.2", "7.3", "8.2", "8.3", "8.4"] },
-    { "id": 5, "tasks": ["6.3", "6.4", "6.5", "6.6", "10.1"] },
+    { "id": 5, "tasks": ["6.3", "6.4", "6.5", "6.6", "6.7", "10.1"] },
     { "id": 6, "tasks": ["10.2", "10.3"] },
     { "id": 7, "tasks": ["10.4", "11.1"] },
     { "id": 8, "tasks": ["10.5", "10.6", "10.7", "10.8", "10.9", "10.10", "10.11", "11.2"] }

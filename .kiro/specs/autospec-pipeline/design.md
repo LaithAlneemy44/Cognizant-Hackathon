@@ -215,18 +215,48 @@ class BuildAgent:
     def run(
         self,
         spec: dict,
-        tech_stack: str,
+        tech_stack: str,          # "python" or "node"
         failure_context: str | None = None,
     ) -> str: ...
 ```
 
 #### Behaviour
 
-1. Build a prompt embedding the `spec`, `tech_stack`, and (if present) `failure_context` from a prior failed test run.
+1. Build a prompt embedding the `spec`, `tech_stack`, and (if present) `failure_context` from a prior failed test run. The prompt instructs the LLM to use a **`python` fenced code block** when `tech_stack == "python"` and a **`javascript` fenced code block** when `tech_stack == "node"`.
 2. Call `llm.complete(prompt)` exactly once.
 3. Extract the content of the **first** fenced markdown code block using the regex ```` ```[\w]*\n(.*?)``` ```` (DOTALL).
 4. Raise `CodeGenerationError` if no code block is found.
 5. Let any `LLMProviderError` (or other SDK exception) propagate unchanged.
+
+#### Prompt Template — Python stack
+
+```
+You are a software engineer. Using the requirements document below, write a
+complete Python implementation.
+
+Return the implementation inside a fenced python code block:
+  ```python
+  # your code here
+  ```
+
+Requirements:
+{spec_as_json}
+```
+
+#### Prompt Template — Node stack
+
+```
+You are a software engineer. Using the requirements document below, write a
+complete Node.js / JavaScript implementation.
+
+Return the implementation inside a fenced javascript code block:
+  ```javascript
+  // your code here
+  ```
+
+Requirements:
+{spec_as_json}
+```
 
 #### Failure Context Prompt Addendum
 
@@ -244,14 +274,14 @@ Please revise the code to fix the failures above.
 
 ### 5. TestAgent (`agents/test_agent.py`)
 
-Generates a pytest test file via LLM and executes it against the generated code in a subprocess.
+Generates a test file via LLM targeting the appropriate framework for the specified tech stack (`pytest` for Python, `Jest` for Node) and executes it against the generated code in a subprocess.
 
 #### Interface
 
 ```python
 class TestAgent:
     def __init__(self, llm: LLMWrapper, quality_threshold: float) -> None: ...
-    def run(self, code: str, spec: dict) -> dict: ...
+    def run(self, code: str, spec: dict, tech_stack: str) -> dict: ...
 ```
 
 #### Output Shape
@@ -266,33 +296,74 @@ class TestAgent:
 }
 ```
 
-#### Behaviour
+#### Common Behaviour (both stacks)
 
-1. Call `llm.complete(prompt)` once to generate a pytest test file targeting the supplied `code` and `spec["acceptance_criteria"]`.
-2. Write `code` to `tempfile.NamedTemporaryFile(suffix=".py", delete=False)` → `code_file`.
-3. Write test content to `tempfile.NamedTemporaryFile(prefix="test_", suffix=".py", delete=False)` → `test_file`.
-4. Execute:
+1. Call `llm.complete(prompt)` once to generate a test file targeting `code` and `spec["acceptance_criteria"]`, instructing the LLM to use pytest (Python) or Jest (Node) depending on `tech_stack`.
+2. Dispatch to the Python or Node execution path based on `tech_stack`.
+3. Set `passed = (result.returncode == 0)`.
+4. If `coverage is not None and coverage < self.quality_threshold`, override `passed = False`.
+5. Clean up all temp resources in a `finally` block (see per-stack details below).
+
+#### Python Execution Path
+
+1. Write `code` to `tempfile.NamedTemporaryFile(suffix=".py", delete=False)` in the system temp dir → `code_file`.
+2. Write test content to `tempfile.NamedTemporaryFile(prefix="test_", suffix=".py", delete=False)` in the system temp dir → `test_file`.
+3. Execute:
    ```python
    result = subprocess.run(
-       ["pytest", test_file.name, f"--import-mode=importlib",
-        f"--rootdir={tempdir}", "-v"],
+       ["pytest", test_file.name, "--import-mode=importlib",
+        "--cov", "--cov-report=term-missing", "-v"],
        capture_output=True,
        timeout=60,
        text=True,
    )
    ```
-5. Parse `coverage` from stdout if pytest-cov output is present; otherwise set `None`.
-6. Set `passed = (result.returncode == 0)`.
-7. If `coverage is not None and coverage < self.quality_threshold`, override `passed = False`.
-8. Delete both temp files in a `finally` block.
+4. Parse `coverage` from the pytest-cov summary line:
+   ```
+   TOTAL    ...    <N>%
+   ```
+   Convert as `float(N) / 100`. If no such line exists, `coverage = None`.
+5. In `finally`: delete `code_file.name` and `test_file.name` (both `.py` files).
 
-#### Coverage Parsing
+#### Node Execution Path
 
-Attempt to extract the total coverage percentage from the pytest-cov summary line:
-```
-TOTAL    ...    <N>%
-```
-Parse `<N>` as `float(N) / 100`. If no such line exists, `coverage = None`.
+1. Create a temporary directory: `tmp_dir = tempfile.mkdtemp()`.
+2. Write `code` to `os.path.join(tmp_dir, "index.js")`.
+3. Write test content to `os.path.join(tmp_dir, "index.test.js")`.
+4. Write a minimal `package.json` to `os.path.join(tmp_dir, "package.json")`:
+   ```json
+   {
+     "name": "autospec-test",
+     "version": "1.0.0",
+     "scripts": { "test": "jest --coverage --coverageReporters=text" },
+     "devDependencies": { "jest": "*" }
+   }
+   ```
+5. Install dependencies:
+   ```python
+   subprocess.run(
+       ["npm", "install"],
+       cwd=tmp_dir,
+       capture_output=True,
+       timeout=60,
+   )
+   ```
+6. Execute tests:
+   ```python
+   result = subprocess.run(
+       ["npx", "jest", "--coverage", "--coverageReporters=text"],
+       cwd=tmp_dir,
+       capture_output=True,
+       timeout=60,
+       text=True,
+   )
+   ```
+7. Parse `coverage` from the Jest text coverage summary line:
+   ```
+   All files    ...    <N>%
+   ```
+   Convert as `float(N) / 100`. If no such line exists, `coverage = None`.
+8. In `finally`: delete the entire temp directory recursively using `shutil.rmtree(tmp_dir)` (removes `index.js`, `index.test.js`, `package.json`, and `node_modules`).
 
 ---
 
@@ -426,7 +497,7 @@ validate run-time inputs
 ├─ BuildAgent.run(spec, tech_stack) → code
 │     [on exception → return error result]
 │
-├─ TestAgent.run(code, spec)        → test_result
+├─ TestAgent.run(code, spec, tech_stack)        → test_result
 │     [on exception → return error result]
 │
 ├─ RETRY LOOP (while not passed and retry_count < max_retries):
@@ -434,7 +505,7 @@ validate run-time inputs
 │     failure_context = test_result["stdout"] + test_result["stderr"]
 │     BuildAgent.run(spec, tech_stack, failure_context) → code
 │         [on exception → return error result, retry_exhausted=False]
-│     TestAgent.run(code, spec)     → test_result
+│     TestAgent.run(code, spec, tech_stack)     → test_result
 │         [on exception → return error result]
 │
 ├─ (if retry_count == max_retries and not passed) → retry_exhausted = True
@@ -530,12 +601,12 @@ Raise `ValueError` (or `ConfigurationError`) for invalid run-time inputs before 
 | Empty/unparseable LLM response (spec) | `SpecAgent.run` | `Pipeline.run` | `error` set, remaining keys `None` |
 | No code block in response | `BuildAgent.run` | `Pipeline.run` | `error` set, remaining keys `None` |
 | Empty/unparseable LLM response (review) | `ReviewAgent.run` | `Pipeline.run` | `error` set |
-| pytest timeout | `subprocess.run` | `TestAgent.run` | `TimeoutExpired` → `TestAgent` propagates |
+| pytest / Jest timeout | `subprocess.run` | `TestAgent.run` | `TimeoutExpired` → `TestAgent` propagates |
 | Missing Pipeline config key | `Pipeline.__init__` | Caller | `ConfigurationError` |
 | Invalid config value/type | `Pipeline.__init__` | Caller | `ConfigurationError` |
 | BuildAgent exception during retry | `BuildAgent.run` | `Pipeline.run` | `error` set, `retry_exhausted=False` |
 
-All agents clean up temp resources (temp files) in `finally` blocks regardless of exception path.
+All agents clean up temp resources in `finally` blocks regardless of exception path. For Python stack: both `.py` temp files are deleted. For Node stack: the entire temp directory is removed recursively via `shutil.rmtree`.
 
 ---
 
@@ -556,10 +627,10 @@ Caller → Pipeline.run(brief, hints, tech_stack, threshold, max_retries)
     ← response with code block
     BuildAgent extracts code
   ← code
-  Pipeline → TestAgent.run(code, spec)
+  Pipeline → TestAgent.run(code, spec, tech_stack)
     TestAgent → LLMWrapper.complete(prompt) → test content
     TestAgent writes temp files
-    TestAgent → subprocess pytest
+    TestAgent → subprocess pytest / npx jest
     TestAgent parses result, deletes temp files
   ← test_result {passed: True}
   Pipeline → build_handoff_diagram(...)
@@ -573,7 +644,7 @@ Pipeline → TestAgent → {passed: False}
   retry_count = 1
   Pipeline → BuildAgent.run(spec, tech_stack, failure_context)
   ← new_code
-  Pipeline → TestAgent.run(new_code, spec)
+  Pipeline → TestAgent.run(new_code, spec, tech_stack)
   ← test_result {passed: True}
   retry_exhausted = False
 Pipeline → build_handoff_diagram(retry_count=1)
@@ -655,29 +726,42 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ### Property 8: TestAgent Result Shape Invariant
 
-*For any* pytest execution outcome (exit code 0, 1, or 2, or any other), `TestAgent.run` SHALL return a dictionary containing exactly the keys `passed` (bool), `exit_code` (int), `stdout` (str), `stderr` (str), and `coverage` (float or `None`).
-
-**Validates: Requirements 4.4**
-
----
-
-### Property 9: Coverage Below Threshold Forces Passed = False
-
-*For any* pytest exit code and any `coverage` value that is not `None` and is strictly less than the `quality_threshold` supplied at `TestAgent` construction time, the returned result dictionary SHALL have `passed` set to `False`.
-
-**Validates: Requirements 4.5**
-
----
-
-### Property 10: Temp Files Always Deleted
-
-*For any* execution outcome of `TestAgent.run` — including successful test runs, failed test runs, and runs that raise an exception — both temporary files written during that invocation SHALL be deleted from the filesystem before `run` returns or propagates an exception.
+*For any* tech stack (`"python"` or `"node"`) and any test execution outcome (exit code 0, 1, 2, or other), `TestAgent.run` SHALL return a dictionary containing exactly the keys `passed` (bool), `exit_code` (int), `stdout` (str), `stderr` (str), and `coverage` (float or `None`).
 
 **Validates: Requirements 4.6**
 
 ---
 
-### Property 11: Retry Count Accurately Reflects Loop Iterations
+### Property 9: TestAgent Uses Correct Test Runner per Tech Stack
+
+*For any* `tech_stack` value, `TestAgent.run` SHALL invoke the correct test runner: `pytest` (with `--import-mode=importlib` and `--cov`) when `tech_stack` is `"python"`, and `npx jest` (with `--coverage --coverageReporters=text`) when `tech_stack` is `"node"`. No other test runner SHALL be invoked for either stack.
+
+**Validates: Requirements 4.4, 4.5**
+
+---
+
+### Property 10: Coverage Below Threshold Forces Passed = False
+
+*For any* test runner exit code and any `coverage` value that is not `None` and is strictly less than the `quality_threshold` supplied at `TestAgent` construction time, the returned result dictionary SHALL have `passed` set to `False`.
+
+**Validates: Requirements 4.9**
+
+---
+
+### Property 11: Temp Files Always Deleted
+
+*For any* execution outcome of `TestAgent.run` — including successful test runs, failed test runs, and runs that raise an exception:
+
+- When `tech_stack` is `"python"`: both temporary `.py` files (the code file and the `test_*.py` file) SHALL be deleted from the filesystem.
+- When `tech_stack` is `"node"`: the entire temporary directory (including `index.js`, `index.test.js`, `package.json`, and the `node_modules` folder) SHALL be deleted recursively via `shutil.rmtree`.
+
+Cleanup SHALL occur before `run` returns or propagates an exception.
+
+**Validates: Requirements 4.10, 4.11**
+
+---
+
+### Property 12: Retry Count Accurately Reflects Loop Iterations
 
 *For any* sequence of BuildAgent/TestAgent outcomes and any `max_retries` value in [1, 10], the `retry_count` in the pipeline result SHALL equal the exact number of times the retry loop body executed (0 on a first-run pass, up to `max_retries` on full exhaustion).
 
@@ -685,7 +769,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 12: Retry Exhaustion Sets retry_exhausted = True
+### Property 13: Retry Exhaustion Sets retry_exhausted = True
 
 *For any* `max_retries` value where all BuildAgent/TestAgent retry cycles produce `passed = False`, the pipeline result SHALL have `retry_exhausted = True` and `retry_count = max_retries`.
 
@@ -693,7 +777,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 13: LLMWrapper Rejects Invalid Provider at Construction
+### Property 14: LLMWrapper Rejects Invalid Provider at Construction
 
 *For any* `ProviderConfig` dictionary where `provider` is absent, empty, or not one of `"bedrock"` or `"openai"`, `LLMWrapper.__init__` SHALL raise a `ConfigurationError` before any API call is made.
 
@@ -701,7 +785,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 14: LLMWrapper Rejects Missing Required Keys at Construction
+### Property 15: LLMWrapper Rejects Missing Required Keys at Construction
 
 *For any* `ProviderConfig` where any required key for the selected provider is absent or empty, `LLMWrapper.__init__` SHALL raise a `ConfigurationError` identifying the missing key.
 
@@ -709,7 +793,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 15: SDK Exceptions Wrapped in LLMProviderError
+### Property 16: SDK Exceptions Wrapped in LLMProviderError
 
 *For any* exception type raised by the underlying provider SDK (boto3 or OpenAI) during a `complete` call, `LLMWrapper` SHALL raise an `LLMProviderError` containing the provider name and the original exception message.
 
@@ -717,7 +801,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 16: Prompt Length Validation in LLMWrapper
+### Property 17: Prompt Length Validation in LLMWrapper
 
 *For any* prompt that is empty (length 0) or exceeds 1,000,000 characters, `LLMWrapper.complete` SHALL raise a `ValueError` without making any API call.
 
@@ -725,7 +809,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 17: ReviewAgent Alignment Report Shape
+### Property 18: ReviewAgent Alignment Report Shape
 
 *For any* `spec` dictionary with N acceptance criteria and any non-empty `code` string, when the LLMWrapper returns a parseable response, `ReviewAgent.run` SHALL return a list of exactly N entries each containing a `covered` field of type `bool` and a `notes` field of type `str` with length ≤ 500 characters.
 
@@ -733,7 +817,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 18: Partial Coverage Does Not Fail Pipeline
+### Property 19: Partial Coverage Does Not Fail Pipeline
 
 *For any* alignment report produced by `ReviewAgent` in which one or more entries have `covered = False`, the pipeline run SHALL not set the `error` key and SHALL continue to completion.
 
@@ -741,7 +825,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 19: HandoffDiagram Contains Correct Nodes for Actual Run
+### Property 20: HandoffDiagram Contains Correct Nodes for Actual Run
 
 *For any* pipeline run, the `handoff_diagram` string SHALL be a valid Mermaid `flowchart LR` and SHALL contain a node for every agent that was invoked during the run, and SHALL NOT contain a node for any agent that was not invoked.
 
@@ -749,7 +833,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 20: HandoffDiagram Retry Edge
+### Property 21: HandoffDiagram Retry Edge
 
 *For any* pipeline run where `retry_count > 0`, the `handoff_diagram` string SHALL contain exactly one directed edge from `TestAgent` to `BuildAgent` with a label of the form `"retry (N)"` where N equals `retry_count`.
 
@@ -757,7 +841,7 @@ Pipeline → build_handoff_diagram(retry_count=3)
 
 ---
 
-### Property 21: Pipeline Rejects Invalid Configuration at Construction
+### Property 22: Pipeline Rejects Invalid Configuration at Construction
 
 *For any* configuration dictionary missing a required key, or containing a key with the wrong type or an out-of-range value, `Pipeline.__init__` SHALL raise a `ConfigurationError` naming the offending key before any agent or LLMWrapper is constructed.
 
@@ -777,7 +861,7 @@ Both unit/example-based tests and property-based tests are used in combination f
 - Subprocess call parameter verification
 - Integration between Pipeline and LLMWrapper (key forwarding)
 
-**Property-based tests** (using Hypothesis) cover all 21 properties above with a minimum of 100 iterations each. Each property test is tagged:
+**Property-based tests** (using Hypothesis) cover all 22 properties above with a minimum of 100 iterations each. Each property test is tagged:
 
 ```
 Feature: autospec-pipeline, Property {N}: {property_title}
@@ -786,7 +870,8 @@ Feature: autospec-pipeline, Property {N}: {property_title}
 ### Key Testing Patterns
 
 - **Mock `LLMWrapper`**: All agent tests inject a `MagicMock` for `LLMWrapper` to avoid real API calls.
-- **Temp file cleanup** (Property 10): Verified by checking `os.path.exists(path)` after `TestAgent.run` in both passing and exception scenarios.
+- **Temp file cleanup** (Property 10): Verified by checking `os.path.exists(path)` (Python) or `os.path.exists(tmp_dir)` (Node) after `TestAgent.run` in both passing and exception scenarios.
+- **Test runner selection** (Property 8a): Verified with `unittest.mock.patch("subprocess.run")` to assert the correct command list (`["pytest", ...]` vs `["npx", "jest", ...]`) is passed for each `tech_stack` value.
 - **Retry loop** (Properties 11, 12): Controlled via a side-effect list on the mocked `TestAgent` to produce a predetermined pass/fail sequence.
 - **Coverage override** (Property 9): Hypothesis generates `(exit_code, coverage, threshold)` triples; asserts `passed == (exit_code == 0 and (coverage is None or coverage >= threshold))`.
 - **Prompt length** (Property 16): Hypothesis generates strings of length 0 and lengths > 1,000,000 to verify `ValueError`.
